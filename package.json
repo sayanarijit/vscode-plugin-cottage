@@ -1,8 +1,8 @@
 {
   "name": "vscode-plugin-cottage",
   "displayName": "Cottage",
-  "description": "Install cottage with the best available registry and configure VS Code agent safety hooks for secret-bearing workspaces.",
-  "version": "0.0.7",
+  "description": "Install cottage with the best available registry and configure VS Code agent safety hooks that block direct ctg use and secret file access.",
+  "version": "0.0.8",
   "publisher": "sayanarijit",
   "license": "MIT",
   "repository": {
@@ -45,7 +45,7 @@
       },
       {
         "command": "cottage.secureWorkspace",
-        "title": "Cottage: Add Copilot Safety Hooks",
+        "title": "Cottage: Add AI Safety Hooks",
         "category": "Cottage"
       },
       {

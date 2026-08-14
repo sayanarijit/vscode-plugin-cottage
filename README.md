@@ -2,7 +2,7 @@
 
 ![Cottage extension demo](https://s13.gifyu.com/images/bn9p8.gif)
 
-This extension installs [cottage](https://github.com/sayanarijit/cottage) with the best available package registry on the local machine, then configures a workspace so Copilot agent sessions do not keep decrypted secrets around or invoke `ctg` directly.
+This extension installs [cottage](https://github.com/sayanarijit/cottage) with the best available package registry on the local machine, then configures a workspace so VS Code agent sessions do not keep decrypted secrets around, invoke `ctg` directly, or read and edit protected secret files.
 
 It also manages `.cott.age` files in the editor by decrypting them into their plaintext sibling when opened, re-encrypting the sibling whenever you save it, then re-encrypting and cleaning up the plaintext file when you switch away or close it.
 
@@ -11,7 +11,7 @@ Repository: <http://github.com/sayanarijit/vscode-plugin-cottage>
 It adds three commands:
 
 - `Cottage: Install And Secure Workspace`
-- `Cottage: Add Copilot Safety Hooks`
+- `Cottage: Add AI Safety Hooks`
 - `Cottage: Encrypt File`
 
 ## Installation
@@ -91,7 +91,7 @@ Installer detection order:
 
 If installation succeeds but `ctg` is still not visible to VS Code, restart VS Code once so the updated `PATH` is picked up.
 
-### `Cottage: Add Copilot Safety Hooks`
+### `Cottage: Add AI Safety Hooks`
 
 This command only writes or updates the safety policy files. Use it when `ctg` is already installed and you only want the workspace protections.
 
@@ -115,19 +115,21 @@ The extension manages these files inside the target workspace:
 - `.github/hooks/ctg-policy.json`
 - `.github/hooks/scripts/deny_ctg_command.py`
 - `.claude/settings.json`
+- `.claude/hooks/deny-secrets.py`
 
 The updates are idempotent. Running the commands again keeps the required cottage entries present without duplicating them.
 
 ## Safety model
 
-The generated policy does four things:
+The generated policy does five things:
 
 1. Runs `ctg clean -qqq` at session start.
 2. Runs `ctg clean -qqq` before each prompt submission.
 3. Denies direct `ctg ...` shell commands from the agent through a pre-tool hook.
-4. Adds a `Bash(ctg*)` deny rule in `.claude/settings.json`.
+4. Denies reading or editing secret-bearing paths such as `.cottage/**`, `**/*.cott.*`, and decrypted files that still have a `.cott.age` sibling.
+5. Adds matching deny rules and a Claude pre-tool hook in `.claude/settings.json`.
 
-This reduces the chance that decrypted secret files remain on disk while an agent is working, and it prevents the agent from running direct `ctg` shell commands that could expose decrypted content.
+This reduces the chance that decrypted secret files remain on disk while an agent is working, prevents direct `ctg` shell commands that could expose decrypted content, and blocks the agent from viewing or modifying protected secret files.
 
 ## Typical workflow
 
@@ -135,7 +137,7 @@ This reduces the chance that decrypted secret files remain on disk while an agen
 2. Run `Cottage: Install And Secure Workspace`.
 3. Let the extension install `ctg` if needed.
 4. Review the generated files in `.github/hooks/` and `.claude/`.
-5. Start your Copilot agent session in that workspace.
+5. Start your VS Code agent session in that workspace.
 
 ## Notes
 

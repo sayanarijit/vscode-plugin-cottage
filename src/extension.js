@@ -340,7 +340,10 @@ function activate(context) {
       void handleDocumentClosed(document);
     }),
     vscode.window.onDidChangeActiveTextEditor((editor) => {
-      void handleActiveEditorChanged(editor);
+      void handleActiveEditorChanged();
+    }),
+    vscode.window.tabGroups.onDidChangeTabs(() => {
+      void handleActiveEditorChanged();
     }),
   );
 
@@ -379,7 +382,7 @@ async function initializeEncryptedDocumentHandling() {
     await handleDocumentOpened(document);
   }
 
-  await handleActiveEditorChanged(vscode.window.activeTextEditor);
+  await handleActiveEditorChanged();
 }
 
 async function handleDocumentOpened(document) {
@@ -410,10 +413,8 @@ async function handleDocumentSaved(document) {
   await syncTrackedDocument(trackedPath);
 }
 
-async function handleActiveEditorChanged(editor) {
-  const nextTrackedPath = editor
-    ? getTrackedDocumentPath(editor.document)
-    : null;
+async function handleActiveEditorChanged() {
+  const nextTrackedPath = getActiveTrackedDocumentPath();
   const previousTrackedPath = activeTrackedDocumentPath;
 
   activeTrackedDocumentPath = nextTrackedPath;
@@ -429,6 +430,34 @@ async function decryptAndRevealDocument(uri) {
 
   if (!decryptedPath) {
     return;
+  }
+
+  const trackedKey = normalizeTrackedPath(decryptedPath);
+  const existingTrackedDocument = trackedFiles.get(trackedKey);
+
+  if (
+    existingTrackedDocument &&
+    !existingTrackedDocument.finalizing &&
+    !existingTrackedDocument.encryptPromise
+  ) {
+    const existingDocument = findOpenDocument(decryptedPath);
+    if (existingDocument) {
+      await vscode.window.showTextDocument(existingDocument, {
+        preview: false,
+        preserveFocus: false,
+      });
+
+      await closeTabsForUri(uri);
+      return;
+    }
+  }
+
+  if (existingTrackedDocument && existingTrackedDocument.encryptPromise) {
+    try {
+      await existingTrackedDocument.encryptPromise;
+    } catch {
+      // The finalization path already surfaced the error.
+    }
   }
 
   const decryptKey = normalizeTrackedPath(encryptedPath);
@@ -1308,14 +1337,39 @@ function getDecryptedPath(encryptedPath) {
 }
 
 function getTrackedDocumentPath(document) {
-  if (!document || document.uri.scheme !== "file") {
+  return document ? getTrackedDocumentPathForUri(document.uri) : null;
+}
+
+function getTrackedDocumentPathForUri(uri) {
+  if (!uri || uri.scheme !== "file") {
     return null;
   }
 
-  const trackedDocument = trackedFiles.get(
-    normalizeTrackedPath(document.uri.fsPath),
-  );
-  return trackedDocument ? trackedDocument.decryptedPath : null;
+  const trackedDocument = trackedFiles.get(normalizeTrackedPath(uri.fsPath));
+  if (trackedDocument) {
+    return trackedDocument.decryptedPath;
+  }
+
+  const decryptedPath = getDecryptedPath(uri.fsPath);
+  if (!decryptedPath) {
+    return null;
+  }
+
+  return trackedFiles.has(normalizeTrackedPath(decryptedPath))
+    ? decryptedPath
+    : null;
+}
+
+function getActiveTrackedDocumentPath() {
+  const activeTabGroup = vscode.window.tabGroups.activeTabGroup;
+  const activeTab = activeTabGroup ? activeTabGroup.activeTab : null;
+
+  if (activeTab && isUriBackedTab(activeTab.input)) {
+    return getTrackedDocumentPathForUri(activeTab.input.uri);
+  }
+
+  const activeEditor = vscode.window.activeTextEditor;
+  return activeEditor ? getTrackedDocumentPath(activeEditor.document) : null;
 }
 
 function normalizeTrackedPath(filePath) {

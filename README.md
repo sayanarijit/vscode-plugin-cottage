@@ -8,10 +8,11 @@ It also manages `.cott.age` files in the editor by decrypting them into their pl
 
 Repository: <http://github.com/sayanarijit/vscode-plugin-cottage>
 
-It adds two commands:
+It adds three commands:
 
 - `Cottage: Install And Secure Workspace`
 - `Cottage: Add Copilot Safety Hooks`
+- `Cottage: Encrypt File`
 
 ## Installation
 
@@ -55,6 +56,8 @@ npx @vscode/vsce package
 
 Open the target repository in VS Code, then run one of these commands from the Command Palette.
 
+You can also right-click a file in the Explorer and choose `Cottage: Encrypt File`.
+
 ### Opening `.cott.age` files
 
 `.cott.age` files are registered with a custom editor, so VS Code opens them through Cottage directly instead of showing the usual binary-file warning.
@@ -89,6 +92,19 @@ If installation succeeds but `ctg` is still not visible to VS Code, restart VS C
 ### `Cottage: Add Copilot Safety Hooks`
 
 This command only writes or updates the safety policy files. Use it when `ctg` is already installed and you only want the workspace protections.
+
+### `Cottage: Encrypt File`
+
+This Explorer file action encrypts the selected plaintext file with `ctg encrypt <file> --clean`.
+
+Before encrypting, the extension:
+
+1. Checks whether `ctg` is already available.
+2. Installs `cottage` if needed, using the same installer detection order as `Cottage: Install And Secure Workspace`.
+3. Looks for a `.cottage` setup in the selected file's workspace ancestry.
+4. Runs `ctg init` in the workspace root when `.cottage` is missing.
+
+If VS Code still cannot see the newly installed `ctg` binary, restart VS Code once and run the command again.
 
 ## What the extension writes
 

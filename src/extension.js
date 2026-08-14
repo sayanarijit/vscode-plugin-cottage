@@ -1,5 +1,6 @@
 const vscode = require('vscode');
 const fs = require('fs/promises');
+const { constants: fsConstants } = require('fs');
 const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
@@ -100,6 +101,9 @@ function activate(context) {
     }),
     vscode.commands.registerCommand('cottage.secureWorkspace', async (uri) => {
       await runSecureWorkspace(uri);
+    }),
+    vscode.commands.registerCommand('cottage.encryptFile', async (uri) => {
+      await runEncryptFile(uri);
     }),
     vscode.workspace.onDidOpenTextDocument((document) => {
       void handleDocumentOpened(document);
@@ -286,27 +290,7 @@ async function runInstallAndSecure(uri) {
         cancellable: false,
       },
       async (progress) => {
-        progress.report({ message: 'Checking for an existing ctg installation' });
-        let installSummary = 'ctg is already available on PATH.';
-
-        const existingCtg = await findExecutable('ctg');
-        if (!existingCtg) {
-          progress.report({ message: 'Detecting the best installer for this environment' });
-          const candidate = await detectBestInstaller();
-          if (!candidate) {
-            throw new Error(
-              'No supported installer was found. Expected one of: cargo, uv, pipx, python3, pnpm, yarn, or npm.'
-            );
-          }
-
-          progress.report({ message: `Installing cottage via ${candidate.label}` });
-          await runCommand(candidate.command, candidate.args, folder.uri.fsPath);
-          installSummary = `Installed cottage via ${candidate.label}.`;
-
-          if (!(await findExecutable('ctg'))) {
-            installSummary += ' Restart VS Code if hooks cannot find ctg on PATH yet.';
-          }
-        }
+        const installSummary = await ensureCtgInstalled(folder.uri.fsPath, progress);
 
         progress.report({ message: 'Writing Copilot and workspace safety policy files' });
         const writeSummary = await secureWorkspace(folder.uri.fsPath);
@@ -332,6 +316,63 @@ async function runInstallAndSecure(uri) {
     if (action === 'Open settings file') {
       await openFile(path.join(folder.uri.fsPath, CLAUDE_SETTINGS_RELATIVE_PATH));
     }
+  } catch (error) {
+    vscode.window.showErrorMessage(formatError(error));
+  }
+}
+
+async function runEncryptFile(uri) {
+  const targetUri = getTargetFileUri(uri);
+  if (!targetUri) {
+    vscode.window.showErrorMessage('Select a file to encrypt with cottage.');
+    return;
+  }
+
+  const targetFilePath = targetUri.fsPath;
+  if (targetFilePath.endsWith(ENCRYPTED_FILE_SUFFIX)) {
+    vscode.window.showErrorMessage('The selected file is already a cottage-encrypted file.');
+    return;
+  }
+
+  try {
+    const stats = await fs.stat(targetFilePath);
+    if (!stats.isFile()) {
+      vscode.window.showErrorMessage('Encrypt with Cottage only supports files.');
+      return;
+    }
+  } catch (error) {
+    vscode.window.showErrorMessage(formatError(error));
+    return;
+  }
+
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(targetUri);
+  const workspaceRoot = workspaceFolder ? workspaceFolder.uri.fsPath : null;
+  const fileDirectory = path.dirname(targetFilePath);
+
+  try {
+    const result = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Cottage',
+        cancellable: false,
+      },
+      async (progress) => {
+        const installSummary = await ensureCtgInstalled(workspaceRoot || fileDirectory, progress);
+        const cottageRoot = await resolveCottageRoot(fileDirectory, workspaceRoot);
+        const initSummary = await ensureCottageInitialized(cottageRoot, progress);
+
+        progress.report({ message: `Encrypting ${path.basename(targetFilePath)}` });
+        await runCommand('ctg', ['encrypt', targetFilePath, '--clean'], cottageRoot);
+
+        return {
+          installSummary,
+          initSummary,
+        };
+      }
+    );
+
+    const parts = [result.installSummary, result.initSummary, `Encrypted ${path.basename(targetFilePath)} with cottage.`].filter(Boolean);
+    vscode.window.showInformationMessage(parts.join(' '));
   } catch (error) {
     vscode.window.showErrorMessage(formatError(error));
   }
@@ -605,6 +646,50 @@ async function detectBestInstaller() {
   return null;
 }
 
+async function ensureCtgInstalled(workingDirectory, progress) {
+  progress.report({ message: 'Checking for an existing ctg installation' });
+
+  if (await findExecutable('ctg')) {
+    return 'ctg is already available on PATH.';
+  }
+
+  progress.report({ message: 'Detecting the best installer for this environment' });
+  const candidate = await detectBestInstaller();
+  if (!candidate) {
+    throw new Error(
+      'No supported installer was found. Expected one of: cargo, uv, pipx, python3, pnpm, yarn, or npm.'
+    );
+  }
+
+  progress.report({ message: `Installing cottage via ${candidate.label}` });
+  await runCommand(candidate.command, candidate.args, workingDirectory);
+
+  if (!(await findExecutable('ctg'))) {
+    throw new Error('Installed cottage, but ctg is not visible to VS Code yet. Restart VS Code and try again.');
+  }
+
+  return `Installed cottage via ${candidate.label}.`;
+}
+
+async function resolveCottageRoot(fileDirectory, workspaceRoot) {
+  const existingRoot = await findNearestCottageRoot(fileDirectory, workspaceRoot);
+  if (existingRoot) {
+    return existingRoot;
+  }
+
+  return workspaceRoot || fileDirectory;
+}
+
+async function ensureCottageInitialized(cottageRoot, progress) {
+  if (await pathExists(path.join(cottageRoot, '.cottage'))) {
+    return 'Cottage is already initialized for this workspace.';
+  }
+
+  progress.report({ message: 'Initializing cottage in this workspace' });
+  await runCommand('ctg', ['init'], cottageRoot);
+  return 'Initialized cottage in this workspace.';
+}
+
 async function runCommand(command, args, cwd) {
   const executablePath = await findExecutable(command);
   if (!executablePath) {
@@ -649,15 +734,14 @@ async function commandSucceeds(command, args) {
 }
 
 async function findExecutable(command) {
-  const envPath = process.env.PATH || '';
-  const pathParts = envPath.split(path.delimiter).filter(Boolean);
+  const pathParts = getExecutableSearchDirectories();
   const executableNames = getExecutableNames(command);
 
   for (const directory of pathParts) {
     for (const executableName of executableNames) {
       const candidatePath = path.join(directory, executableName);
       try {
-        await fs.access(candidatePath);
+        await fs.access(candidatePath, fsConstants.X_OK);
         return candidatePath;
       } catch {
         continue;
@@ -666,6 +750,54 @@ async function findExecutable(command) {
   }
 
   return null;
+}
+
+function getExecutableSearchDirectories() {
+  const directories = new Set((process.env.PATH || '').split(path.delimiter).filter(Boolean));
+  const homeDirectory = os.homedir();
+
+  if (process.platform !== 'win32' && homeDirectory) {
+    directories.add(path.join(homeDirectory, '.cargo', 'bin'));
+    directories.add(path.join(homeDirectory, '.local', 'bin'));
+    directories.add(path.join(homeDirectory, '.npm-global', 'bin'));
+    directories.add(path.join(homeDirectory, '.config', 'yarn', 'global', 'node_modules', '.bin'));
+    directories.add(path.join(homeDirectory, '.yarn', 'bin'));
+    directories.add(path.join(homeDirectory, '.local', 'share', 'pnpm'));
+    directories.add(path.join(homeDirectory, 'bin'));
+  }
+
+  return Array.from(directories);
+}
+
+async function pathExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function findNearestCottageRoot(startDirectory, stopDirectory) {
+  let currentDirectory = path.resolve(startDirectory);
+  const resolvedStopDirectory = stopDirectory ? path.resolve(stopDirectory) : null;
+
+  while (true) {
+    if (await pathExists(path.join(currentDirectory, '.cottage'))) {
+      return currentDirectory;
+    }
+
+    if (resolvedStopDirectory && normalizeTrackedPath(currentDirectory) === normalizeTrackedPath(resolvedStopDirectory)) {
+      return null;
+    }
+
+    const parentDirectory = path.dirname(currentDirectory);
+    if (parentDirectory === currentDirectory) {
+      return null;
+    }
+
+    currentDirectory = parentDirectory;
+  }
 }
 
 function getExecutableNames(command) {
@@ -691,6 +823,19 @@ function isPlainObject(value) {
 
 function isEncryptedDocument(document) {
   return document.uri.scheme === 'file' && document.fileName.endsWith(ENCRYPTED_FILE_SUFFIX);
+}
+
+function getTargetFileUri(uri) {
+  if (uri && uri.scheme === 'file') {
+    return uri;
+  }
+
+  const activeDocument = vscode.window.activeTextEditor && vscode.window.activeTextEditor.document;
+  if (activeDocument && activeDocument.uri.scheme === 'file') {
+    return activeDocument.uri;
+  }
+
+  return null;
 }
 
 function getDecryptedPath(encryptedPath) {

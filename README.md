@@ -57,6 +57,8 @@ Open the target repository in VS Code, then run one of these commands from the C
 
 ### Opening `.cott.age` files
 
+`.cott.age` files are registered with a custom editor, so VS Code opens them through Cottage directly instead of showing the usual binary-file warning.
+
 When you open `name.cott.age`, the extension runs `ctg decrypt name.cott.age`, opens `name` instead, and closes the encrypted tab.
 
 When you switch away from the decrypted tab or close it, the extension saves it if needed, runs `ctg encrypt name --clean`, and closes the plaintext tab.

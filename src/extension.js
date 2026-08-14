@@ -5,6 +5,7 @@ const os = require('os');
 const { spawn } = require('child_process');
 
 const CLEAN_COMMAND = 'ctg clean -qqq';
+const ENCRYPTED_FILE_VIEW_TYPE = 'cottage.encryptedFileViewer';
 const DENY_SCRIPT_RELATIVE_PATH = path.join('.github', 'hooks', 'scripts', 'deny_ctg_command.py');
 const CTG_POLICY_RELATIVE_PATH = path.join('.github', 'hooks', 'ctg-policy.json');
 const CLAUDE_SETTINGS_RELATIVE_PATH = path.join('.claude', 'settings.json');
@@ -87,6 +88,13 @@ if __name__ == "__main__":
 
 function activate(context) {
   context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(
+      ENCRYPTED_FILE_VIEW_TYPE,
+      createEncryptedFileEditorProvider(),
+      {
+        supportsMultipleEditorsPerDocument: false,
+      }
+    ),
     vscode.commands.registerCommand('cottage.installAndSecureWorkspace', async (uri) => {
       await runInstallAndSecure(uri);
     }),
@@ -108,6 +116,29 @@ function activate(context) {
 }
 
 function deactivate() {}
+
+function createEncryptedFileEditorProvider() {
+  return {
+    async openCustomDocument(uri) {
+      return {
+        uri,
+        dispose() {},
+      };
+    },
+    async resolveCustomEditor(document, webviewPanel) {
+      webviewPanel.webview.options = {
+        enableScripts: false,
+      };
+      webviewPanel.webview.html = getEncryptedEditorHtml('Opening encrypted file...');
+
+      try {
+        await decryptAndRevealDocument(document.uri);
+      } catch (error) {
+        webviewPanel.webview.html = getEncryptedEditorHtml(formatError(error));
+      }
+    },
+  };
+}
 
 async function initializeEncryptedDocumentHandling() {
   for (const document of vscode.workspace.textDocuments) {
@@ -707,6 +738,48 @@ async function closeTabsForUri(uri) {
 
 function isUriBackedTab(input) {
   return Boolean(input) && typeof input === 'object' && 'uri' in input && input.uri instanceof vscode.Uri;
+}
+
+function getEncryptedEditorHtml(message) {
+  const safeMessage = escapeHtml(message);
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cottage</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: var(--vscode-font-family);
+      background: var(--vscode-editor-background);
+      color: var(--vscode-editor-foreground);
+      display: grid;
+      place-items: center;
+      min-height: 100vh;
+    }
+
+    p {
+      margin: 0;
+      padding: 0 24px;
+      text-align: center;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <p>${safeMessage}</p>
+</body>
+</html>`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 async function openFile(filePath) {

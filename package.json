@@ -2,7 +2,7 @@
   "name": "vscode-plugin-cottage",
   "displayName": "Cottage",
   "description": "Install cottage with the best available registry and configure VS Code agent safety hooks for secret-bearing workspaces.",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "sayanarijit",
   "license": "MIT",
   "repository": {
@@ -16,6 +16,9 @@
   "engines": {
     "vscode": "^1.95.0"
   },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "categories": [
     "Other"
   ],

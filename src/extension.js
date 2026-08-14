@@ -8,6 +8,11 @@ const CLEAN_COMMAND = 'ctg clean -qqq';
 const DENY_SCRIPT_RELATIVE_PATH = path.join('.github', 'hooks', 'scripts', 'deny_ctg_command.py');
 const CTG_POLICY_RELATIVE_PATH = path.join('.github', 'hooks', 'ctg-policy.json');
 const CLAUDE_SETTINGS_RELATIVE_PATH = path.join('.claude', 'settings.json');
+const ENCRYPTED_FILE_SUFFIX = '.cott.age';
+
+const trackedFiles = new Map();
+const decryptInFlight = new Set();
+let activeTrackedDocumentPath = null;
 
 const DENY_SCRIPT_CONTENT = `#!/usr/bin/env python3
 
@@ -87,11 +92,154 @@ function activate(context) {
     }),
     vscode.commands.registerCommand('cottage.secureWorkspace', async (uri) => {
       await runSecureWorkspace(uri);
+    }),
+    vscode.workspace.onDidOpenTextDocument((document) => {
+      void handleDocumentOpened(document);
+    }),
+    vscode.workspace.onDidCloseTextDocument((document) => {
+      void handleDocumentClosed(document);
+    }),
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      void handleActiveEditorChanged(editor);
     })
   );
+
+  void initializeEncryptedDocumentHandling();
 }
 
 function deactivate() {}
+
+async function initializeEncryptedDocumentHandling() {
+  for (const document of vscode.workspace.textDocuments) {
+    await handleDocumentOpened(document);
+  }
+
+  await handleActiveEditorChanged(vscode.window.activeTextEditor);
+}
+
+async function handleDocumentOpened(document) {
+  if (!isEncryptedDocument(document)) {
+    return;
+  }
+
+  await decryptAndRevealDocument(document.uri);
+}
+
+async function handleDocumentClosed(document) {
+  const trackedDocument = trackedFiles.get(normalizeTrackedPath(document.uri.fsPath));
+  if (!trackedDocument) {
+    return;
+  }
+
+  await finalizeTrackedDocument(trackedDocument.decryptedPath);
+}
+
+async function handleActiveEditorChanged(editor) {
+  const nextTrackedPath = editor ? getTrackedDocumentPath(editor.document) : null;
+  const previousTrackedPath = activeTrackedDocumentPath;
+
+  activeTrackedDocumentPath = nextTrackedPath;
+
+  if (previousTrackedPath && previousTrackedPath !== nextTrackedPath) {
+    await finalizeTrackedDocument(previousTrackedPath);
+  }
+}
+
+async function decryptAndRevealDocument(uri) {
+  const encryptedPath = uri.fsPath;
+  const decryptedPath = getDecryptedPath(encryptedPath);
+
+  if (!decryptedPath) {
+    return;
+  }
+
+  const decryptKey = normalizeTrackedPath(encryptedPath);
+  if (decryptInFlight.has(decryptKey)) {
+    return;
+  }
+
+  decryptInFlight.add(decryptKey);
+
+  try {
+    await runCommand('ctg', ['decrypt', encryptedPath], path.dirname(encryptedPath));
+
+    const trackedDocument = trackedFiles.get(normalizeTrackedPath(decryptedPath)) || {
+      decryptedPath,
+      encryptedPath,
+      encryptPromise: null,
+      finalizing: false,
+    };
+
+    trackedDocument.encryptedPath = encryptedPath;
+    trackedDocument.finalizing = false;
+    trackedFiles.set(normalizeTrackedPath(decryptedPath), trackedDocument);
+
+    const document = await vscode.workspace.openTextDocument(decryptedPath);
+    await vscode.window.showTextDocument(document, {
+      preview: false,
+      preserveFocus: false,
+    });
+
+    await closeTabsForUri(uri);
+  } catch (error) {
+    vscode.window.showErrorMessage(formatError(error));
+  } finally {
+    decryptInFlight.delete(decryptKey);
+  }
+}
+
+async function finalizeTrackedDocument(decryptedPath) {
+  const trackedKey = normalizeTrackedPath(decryptedPath);
+  const trackedDocument = trackedFiles.get(trackedKey);
+  if (!trackedDocument) {
+    return;
+  }
+
+  if (trackedDocument.encryptPromise) {
+    try {
+      await trackedDocument.encryptPromise;
+    } catch {
+      // The original finalize call already surfaced the error.
+    }
+    return;
+  }
+
+  trackedDocument.finalizing = true;
+  trackedDocument.encryptPromise = (async () => {
+    try {
+      const document = findOpenDocument(trackedDocument.decryptedPath);
+      if (document && document.isDirty) {
+        const saved = await document.save();
+        if (!saved || document.isDirty) {
+          throw new Error(`Failed to save ${path.basename(trackedDocument.decryptedPath)} before encryption.`);
+        }
+      }
+
+      await runCommand(
+        'ctg',
+        ['encrypt', trackedDocument.decryptedPath, '--clean'],
+        path.dirname(trackedDocument.decryptedPath)
+      );
+
+      await closeTabsForUri(vscode.Uri.file(trackedDocument.decryptedPath));
+    } catch (error) {
+      trackedDocument.finalizing = false;
+      trackedDocument.encryptPromise = null;
+      throw error;
+    }
+
+    trackedFiles.delete(trackedKey);
+    if (activeTrackedDocumentPath === trackedDocument.decryptedPath) {
+      activeTrackedDocumentPath = null;
+    }
+  })();
+
+  try {
+    await trackedDocument.encryptPromise;
+  } catch (error) {
+    vscode.window.showErrorMessage(formatError(error));
+  }
+}
 
 async function runInstallAndSecure(uri) {
   const folder = await pickWorkspaceFolder(uri);
@@ -508,6 +656,57 @@ function asObject(value) {
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isEncryptedDocument(document) {
+  return document.uri.scheme === 'file' && document.fileName.endsWith(ENCRYPTED_FILE_SUFFIX);
+}
+
+function getDecryptedPath(encryptedPath) {
+  if (!encryptedPath.endsWith(ENCRYPTED_FILE_SUFFIX)) {
+    return null;
+  }
+
+  return encryptedPath.slice(0, -ENCRYPTED_FILE_SUFFIX.length);
+}
+
+function getTrackedDocumentPath(document) {
+  if (!document || document.uri.scheme !== 'file') {
+    return null;
+  }
+
+  const trackedDocument = trackedFiles.get(normalizeTrackedPath(document.uri.fsPath));
+  return trackedDocument ? trackedDocument.decryptedPath : null;
+}
+
+function normalizeTrackedPath(filePath) {
+  return process.platform === 'win32' ? filePath.toLowerCase() : filePath;
+}
+
+function findOpenDocument(filePath) {
+  return vscode.workspace.textDocuments.find(
+    (document) => document.uri.scheme === 'file' && normalizeTrackedPath(document.uri.fsPath) === normalizeTrackedPath(filePath)
+  );
+}
+
+async function closeTabsForUri(uri) {
+  const tabs = [];
+
+  for (const group of vscode.window.tabGroups.all) {
+    for (const tab of group.tabs) {
+      if (isUriBackedTab(tab.input) && tab.input.uri.fsPath === uri.fsPath) {
+        tabs.push(tab);
+      }
+    }
+  }
+
+  if (tabs.length > 0) {
+    await vscode.window.tabGroups.close(tabs);
+  }
+}
+
+function isUriBackedTab(input) {
+  return Boolean(input) && typeof input === 'object' && 'uri' in input && input.uri instanceof vscode.Uri;
 }
 
 async function openFile(filePath) {

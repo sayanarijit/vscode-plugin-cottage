@@ -1,13 +1,10 @@
 # Cottage VS Code Extension
 
-<p align="center">
-	<picture>
-		<source media="(prefers-color-scheme: dark)" srcset="media/cottage-dark.png">
-		<img alt="The Cottage logo" width="320" src="media/cottage.png">
-	</picture>
-</p>
+![The Cottage logo](media/cottage.png)
 
 This extension installs [cottage](https://github.com/sayanarijit/cottage) with the best available package registry on the local machine, then configures a workspace so Copilot agent sessions do not keep decrypted secrets around or invoke `ctg` directly.
+
+It also manages `.cott.age` files in the editor by decrypting them into their plaintext sibling when opened, then re-encrypting and cleaning up the plaintext file when you switch away or close it.
 
 Repository: <http://github.com/sayanarijit/vscode-plugin-cottage>
 
@@ -18,9 +15,18 @@ It adds two commands:
 
 ## Installation
 
-This repository is currently set up as a source extension. Install it locally from the repo.
+Install the extension from the Visual Studio Marketplace or locally from this repository.
 
-### Option 1: Run it as an unpacked development extension
+### Option 1: Install from the Visual Studio Marketplace
+
+Use this if you want the normal published extension.
+
+1. Open the extension page: <https://marketplace.visualstudio.com/items?itemName=sayanarijit.vscode-plugin-cottage>
+2. Click `Install`.
+3. Open the workspace you want to secure.
+4. Run one of the `Cottage:` commands from the Command Palette.
+
+### Option 2: Run it as an unpacked development extension
 
 Use this if you just want to try it immediately.
 
@@ -30,7 +36,7 @@ Use this if you just want to try it immediately.
 4. In the new window, open the workspace you want to secure.
 5. Run one of the `Cottage:` commands from the Command Palette.
 
-### Option 2: Package a VSIX and install it
+### Option 3: Package a VSIX and install it
 
 Use this if you want a normal locally installed extension.
 
@@ -48,6 +54,14 @@ npx @vscode/vsce package
 ## Usage
 
 Open the target repository in VS Code, then run one of these commands from the Command Palette.
+
+### Opening `.cott.age` files
+
+When you open `name.cott.age`, the extension runs `ctg decrypt name.cott.age`, opens `name` instead, and closes the encrypted tab.
+
+When you switch away from the decrypted tab or close it, the extension saves it if needed, runs `ctg encrypt name --clean`, and closes the plaintext tab.
+
+This behavior requires `ctg` to already be available on `PATH`.
 
 ### `Cottage: Install And Secure Workspace`
 
@@ -107,6 +121,7 @@ This reduces the chance that decrypted secret files remain on disk while an agen
 
 - The extension does not decrypt secrets for you.
 - The extension does not modify your global shell profile.
+- Automatic `.cott.age` handling only works for files on the local filesystem.
 - The extension expects the target workspace to be a repository where these policy files can be committed if you want the protections shared with the team.
 - If your team already has custom `.claude/settings.json` or `.github/hooks/ctg-policy.json` content, the extension merges the required cottage entries instead of overwriting the whole file.
 

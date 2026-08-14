@@ -108,6 +108,9 @@ function activate(context) {
     vscode.workspace.onDidOpenTextDocument((document) => {
       void handleDocumentOpened(document);
     }),
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      void handleDocumentSaved(document);
+    }),
     vscode.workspace.onDidCloseTextDocument((document) => {
       void handleDocumentClosed(document);
     }),
@@ -169,6 +172,15 @@ async function handleDocumentClosed(document) {
   await finalizeTrackedDocument(trackedDocument.decryptedPath);
 }
 
+async function handleDocumentSaved(document) {
+  const trackedPath = getTrackedDocumentPath(document);
+  if (!trackedPath) {
+    return;
+  }
+
+  await syncTrackedDocument(trackedPath);
+}
+
 async function handleActiveEditorChanged(editor) {
   const nextTrackedPath = editor ? getTrackedDocumentPath(editor.document) : null;
   const previousTrackedPath = activeTrackedDocumentPath;
@@ -202,6 +214,7 @@ async function decryptAndRevealDocument(uri) {
       decryptedPath,
       encryptedPath,
       encryptPromise: null,
+      saveEncryptPromise: null,
       finalizing: false,
     };
 
@@ -228,6 +241,14 @@ async function finalizeTrackedDocument(decryptedPath) {
   const trackedDocument = trackedFiles.get(trackedKey);
   if (!trackedDocument) {
     return;
+  }
+
+  if (trackedDocument.saveEncryptPromise) {
+    try {
+      await trackedDocument.saveEncryptPromise;
+    } catch {
+      // Save-triggered encryption already surfaced its own error.
+    }
   }
 
   if (trackedDocument.encryptPromise) {
@@ -271,6 +292,48 @@ async function finalizeTrackedDocument(decryptedPath) {
 
   try {
     await trackedDocument.encryptPromise;
+  } catch (error) {
+    vscode.window.showErrorMessage(formatError(error));
+  }
+}
+
+async function syncTrackedDocument(decryptedPath) {
+  const trackedKey = normalizeTrackedPath(decryptedPath);
+  const trackedDocument = trackedFiles.get(trackedKey);
+  if (!trackedDocument || trackedDocument.finalizing) {
+    return;
+  }
+
+  if (trackedDocument.encryptPromise) {
+    try {
+      await trackedDocument.encryptPromise;
+    } catch {
+      // The finalization path already surfaced the error.
+    }
+    return;
+  }
+
+  if (trackedDocument.saveEncryptPromise) {
+    try {
+      await trackedDocument.saveEncryptPromise;
+    } catch {
+      // The original save-triggered call already surfaced the error.
+    }
+    return;
+  }
+
+  trackedDocument.saveEncryptPromise = (async () => {
+    try {
+      await runCommand('ctg', ['encrypt', trackedDocument.decryptedPath], path.dirname(trackedDocument.decryptedPath));
+    } catch (error) {
+      throw error;
+    } finally {
+      trackedDocument.saveEncryptPromise = null;
+    }
+  })();
+
+  try {
+    await trackedDocument.saveEncryptPromise;
   } catch (error) {
     vscode.window.showErrorMessage(formatError(error));
   }

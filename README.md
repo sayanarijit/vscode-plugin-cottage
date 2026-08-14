@@ -4,7 +4,7 @@
 
 This extension installs [cottage](https://github.com/sayanarijit/cottage) with the best available package registry on the local machine, then configures a workspace so Copilot agent sessions do not keep decrypted secrets around or invoke `ctg` directly.
 
-It also manages `.cott.age` files in the editor by decrypting them into their plaintext sibling when opened, then re-encrypting and cleaning up the plaintext file when you switch away or close it.
+It also manages `.cott.age` files in the editor by decrypting them into their plaintext sibling when opened, re-encrypting the sibling whenever you save it, then re-encrypting and cleaning up the plaintext file when you switch away or close it.
 
 Repository: <http://github.com/sayanarijit/vscode-plugin-cottage>
 
@@ -64,6 +64,8 @@ You can also right-click a file in the Explorer and choose `Cottage: Encrypt Fil
 `.cott.age` files are registered with a custom editor, so VS Code opens them through Cottage directly instead of showing the usual binary-file warning.
 
 When you open `name.cott.age`, the extension runs `ctg decrypt name.cott.age`, opens `name` instead, and closes the encrypted tab.
+
+When you save the decrypted file, the extension runs `ctg encrypt name` so the encrypted sibling stays in sync while you continue editing.
 
 When you switch away from the decrypted tab or close it, the extension saves it if needed, runs `ctg encrypt name --clean`, and closes the plaintext tab.
 

@@ -1,12 +1,13 @@
 # Cottage VS Code Extension
 
-![The Cottage logo](media/cottage.jpg)
+![Cottage extension demo](media/demo.gif)
 
 This extension installs [cottage](https://github.com/sayanarijit/cottage) with the best available package registry on the local machine, then configures a workspace so Copilot agent sessions do not keep decrypted secrets around or invoke `ctg` directly.
 
 It also manages `.cott.age` files in the editor by decrypting them into their plaintext sibling when opened, then re-encrypting and cleaning up the plaintext file when you switch away or close it.
 
 Repository: <http://github.com/sayanarijit/vscode-plugin-cottage>
+
 
 It adds three commands:
 

@@ -1,6 +1,6 @@
 # Cottage VS Code Extension
 
-![The Cottage logo](media/cottage.png)
+![The Cottage logo](media/cottage.jpg)
 
 This extension installs [cottage](https://github.com/sayanarijit/cottage) with the best available package registry on the local machine, then configures a workspace so Copilot agent sessions do not keep decrypted secrets around or invoke `ctg` directly.
 

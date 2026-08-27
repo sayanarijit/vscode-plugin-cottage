@@ -97,7 +97,7 @@ This command only writes or updates the safety policy files. Use it when `ctg` i
 
 ### `Cottage: Encrypt File`
 
-This Explorer file action encrypts the selected plaintext file with `ctg encrypt <file> --clean`.
+This Explorer file action encrypts the selected plaintext file with `ctg encrypt <file> --clean` and opens the resulting `.cott.age` file.
 
 Before encrypting, the extension:
 

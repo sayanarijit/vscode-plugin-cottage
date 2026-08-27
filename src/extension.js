@@ -696,6 +696,16 @@ async function runEncryptFile(uri) {
   const fileDirectory = path.dirname(targetFilePath);
 
   try {
+    const openDocument = findOpenDocument(targetFilePath);
+    if (openDocument && openDocument.isDirty) {
+      const saved = await openDocument.save();
+      if (!saved || openDocument.isDirty) {
+        throw new Error(
+          `Failed to save ${path.basename(targetFilePath)} before encryption.`,
+        );
+      }
+    }
+
     const result = await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
@@ -732,12 +742,23 @@ async function runEncryptFile(uri) {
       },
     );
 
+    const trackedKey = normalizeTrackedPath(targetFilePath);
+    trackedFiles.delete(trackedKey);
+    if (activeTrackedDocumentPath === targetFilePath) {
+      activeTrackedDocumentPath = null;
+    }
+
+    const encryptedFilePath = `${targetFilePath}${ENCRYPTED_FILE_SUFFIX}`;
+    const encryptedUri = vscode.Uri.file(encryptedFilePath);
+
     const parts = [
       result.installSummary,
       result.initSummary,
       `Encrypted ${path.basename(targetFilePath)} with cottage.`,
     ].filter(Boolean);
     vscode.window.showInformationMessage(parts.join(" "));
+
+    await vscode.commands.executeCommand("vscode.open", encryptedUri);
   } catch (error) {
     vscode.window.showErrorMessage(formatError(error));
   }

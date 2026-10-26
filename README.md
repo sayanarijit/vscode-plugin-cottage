@@ -1,10 +1,8 @@
 # Cottage VS Code Extension
 
-![Cottage extension demo](https://s13.gifyu.com/images/bn9p8.gif)
+This extension installs [cottage](https://github.com/sayanarijit/cottage) with the best available package registry on the local machine, then configures a workspace so VS Code agent sessions do not invoke `ctg` directly or read and edit protected secret files.
 
-This extension installs [cottage](https://github.com/sayanarijit/cottage) with the best available package registry on the local machine, then configures a workspace so VS Code agent sessions do not keep decrypted secrets around, invoke `ctg` directly, or read and edit protected secret files.
-
-It also manages `.cott.age` files in the editor by decrypting them into their plaintext sibling when opened, re-encrypting the sibling whenever you save it, then re-encrypting and cleaning up the plaintext file when you switch away or close it.
+It also opens `.cott.age` files in the editor by decrypting them in memory (`ctg cat -- <file>`) and re-encrypting on save by piping the buffer to `ctg cat`. Plaintext never touches the disk, and the editor never uses the disk-based `ctg decrypt` or `ctg clean` commands. The one exception is `Cottage: Encrypt File`, which runs `ctg encrypt`.
 
 Repository: <http://github.com/sayanarijit/vscode-plugin-cottage>
 
@@ -62,11 +60,9 @@ You can also right-click a file in the Explorer and choose `Cottage: Encrypt Fil
 
 `.cott.age` files are registered with a custom editor, so VS Code opens them through Cottage directly instead of showing the usual binary-file warning.
 
-When you open `name.cott.age`, the extension runs `ctg decrypt name.cott.age`, opens `name` instead, and closes the encrypted tab.
+When you open `name.cott.age`, the extension runs `ctg cat -- name.cott.age`, shows the output in an in-memory `cottage:` editor tab named `name`, and closes the encrypted tab.
 
-When you save the decrypted file, the extension runs `ctg encrypt name` so the encrypted sibling stays in sync while you continue editing.
-
-When you switch away from the decrypted tab or close it, the extension saves it if needed, runs `ctg encrypt name --clean`, and closes the plaintext tab.
+When you save, the buffer is piped to the stdin of `ctg cat -- name.cott.age`, which re-encrypts it in place. Empty content is refused, because `ctg cat` treats empty stdin as a decrypt request.
 
 This behavior requires `ctg` to already be available on `PATH`.
 
@@ -97,7 +93,7 @@ This command only writes or updates the safety policy files. Use it when `ctg` i
 
 ### `Cottage: Encrypt File`
 
-This Explorer file action encrypts the selected plaintext file with `ctg encrypt <file> --clean` and opens the resulting `.cott.age` file.
+This Explorer file action encrypts the selected plaintext file with `ctg encrypt -- <file>`, leaves the plaintext file in place, and opens the resulting `.cott.age` file.
 
 Before encrypting, the extension:
 
@@ -121,15 +117,13 @@ The updates are idempotent. Running the commands again keeps the required cottag
 
 ## Safety model
 
-The generated policy does five things:
+The generated policy does three things:
 
-1. Runs `ctg clean -qqq` at session start.
-2. Runs `ctg clean -qqq` before each prompt submission.
-3. Denies direct `ctg ...` shell commands from the agent through a pre-tool hook.
-4. Denies reading or editing secret-bearing paths such as `.cottage/**`, `**/*.cott.*`, and decrypted files that still have a `.cott.age` sibling.
-5. Adds matching deny rules and a Claude pre-tool hook in `.claude/settings.json`.
+1. Denies direct `ctg ...` shell commands from the agent through a pre-tool hook.
+2. Denies reading or editing secret-bearing paths such as `.cottage/**`, `**/*.cott.*`, and decrypted files that still have a `.cott.age` sibling.
+3. Adds matching deny rules and a Claude pre-tool hook in `.claude/settings.json`.
 
-This reduces the chance that decrypted secret files remain on disk while an agent is working, prevents direct `ctg` shell commands that could expose decrypted content, and blocks the agent from viewing or modifying protected secret files.
+Since the editor only decrypts in memory, the old `ctg clean -qqq` session and prompt hooks are no longer written, and re-running the secure command removes them from existing config.
 
 ## Typical workflow
 

@@ -2,7 +2,7 @@
   "name": "vscode-plugin-cottage",
   "displayName": "Cottage",
   "description": "Install cottage with the best available registry and configure VS Code agent safety hooks that block direct ctg use and secret file access.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "sayanarijit",
   "license": "MIT",
   "repository": {

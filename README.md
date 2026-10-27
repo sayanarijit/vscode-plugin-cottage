@@ -2,7 +2,7 @@
 
 This extension installs [cottage](https://github.com/sayanarijit/cottage) with the best available package registry on the local machine, then configures a workspace so VS Code agent sessions do not invoke `ctg` directly or read and edit protected secret files.
 
-It also opens `.cott.age` files in the editor by decrypting them in memory (`ctg cat -- <file>`) and re-encrypting on save by piping the buffer to `ctg cat`. Plaintext never touches the disk, and the editor never uses the disk-based `ctg decrypt` or `ctg clean` commands. The one exception is `Cottage: Encrypt File`, which runs `ctg encrypt`.
+It also opens `.cott.age` files in the editor by decrypting them in memory (`ctg cat -- <file>`) and re-encrypting on save by piping the buffer to `ctg tee`. Plaintext never touches the disk, and the editor never uses the disk-based `ctg decrypt` or `ctg clean` commands. The one exception is `Cottage: Encrypt File`, which runs `ctg encrypt`.
 
 Repository: <http://github.com/sayanarijit/vscode-plugin-cottage>
 
@@ -62,7 +62,7 @@ You can also right-click a file in the Explorer and choose `Cottage: Encrypt Fil
 
 When you open `name.cott.age`, the extension runs `ctg cat -- name.cott.age`, shows the output in an in-memory `cottage:` editor tab named `name`, and closes the encrypted tab.
 
-When you save, the buffer is piped to the stdin of `ctg cat -- name.cott.age`, which re-encrypts it in place. Empty content is refused, because `ctg cat` treats empty stdin as a decrypt request.
+When you save, the buffer is piped to the stdin of `ctg tee -- name.cott.age`, which re-encrypts it in place. Empty content is refused.
 
 This behavior requires `ctg` to already be available on `PATH`.
 

@@ -343,7 +343,7 @@ function activate(context) {
 function deactivate() {}
 
 // Serves decrypted content from memory only: reads run `ctg cat -- <enc>` and
-// writes pipe the buffer to the stdin of `ctg cat -- <enc>`. Nothing plaintext
+// writes pipe the buffer to the stdin of `ctg tee -- <enc>`. Nothing plaintext
 // ever touches the disk.
 class DecryptedFileSystemProvider {
   constructor() {
@@ -391,7 +391,7 @@ class DecryptedFileSystemProvider {
 
     await runCommand(
       "ctg",
-      ["cat", "--", encryptedPath],
+      ["tee", "--", encryptedPath],
       path.dirname(encryptedPath),
       Buffer.from(content),
     );
